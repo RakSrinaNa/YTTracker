@@ -1,5 +1,5 @@
 $(function () {
-	const BREAK_THRESHOLD = 25 * 60 * 60 * 1000;
+	const BREAK_MAX_TOLERABLE = 30 * 60 * 60 * 1000;
 	const BREAK_HALF_INTERVAL = 30 * 60 * 1000;
 
 	am4core.useTheme(am4themes_animated);
@@ -17,6 +17,7 @@ $(function () {
 	if (chartDiv) {
 		YTTGetConfig(null, function (config) {
 			const data = [];
+			let maxCorrectVal = 0;
 			let breaks = [];
 
 			/**
@@ -28,26 +29,39 @@ $(function () {
 
 				if (breaks.length === 0) {
 					breaks.push({
-						from: BREAK_THRESHOLD,
+						from: maxCorrectVal,
 						to: minVal
 					});
 				} else {
-					let allMax = maxVal;
-					let allMin = minVal;
-					const it = a.values();
-					let entry;
-					while (!(entry = it.next()).done) {
-						if (minVal <= entry.from && maxVal >= entry.to) { //We're inside another break, need to split it and we're done
-							it.remove();
-							breaks.push({
+					let foundBreak = false;
+					let allMax = maxCorrectVal;
+					for(let entry of breaks) {
+						if(entry.to > allMax){
+							allMax = entry.to;
+						}
+						if (minVal > entry.from && maxVal < entry.to) { //We're inside another break, need to split it and we're done
+							breaks.push({ // Upper half
 								from: maxVal,
 								to: entry.to
 							});
-							breaks.push({
-								from: entry.from,
-								to: minVal
-							});
+							entry.to = minVal; // Lower half
+							foundBreak = true;
+							break;
 						}
+						if(maxVal > entry.from && minVal < entry.from ){
+							entry.from = maxVal;
+							foundBreak = true;
+						}
+						if(minVal < entry.to && maxVal > entry.to){
+							entry.to = minVal;
+							foundBreak = true;
+						}
+					}
+					if(!foundBreak){
+						breaks.push({
+							from: allMax + 2 * BREAK_HALF_INTERVAL,
+							to: minVal
+						});
 					}
 				}
 			}
@@ -62,13 +76,23 @@ $(function () {
 					watched: conf.getWatchedDuration().getAsMilliseconds(),
 					opened: conf.getOpenedDuration().getAsMilliseconds(),
 					count: conf.getCount(),
-					ratio: conf.getWatchedDuration().getAsMilliseconds() / Math.max(1, Math.max(conf.getWatchedDuration().getAsMilliseconds(), conf.getOpenedDuration().getAsMilliseconds()))
+					ratio: conf.getWatchedDuration().getAsMilliseconds() / Math.max(1, conf.getWatchedDuration().getAsMilliseconds(), conf.getOpenedDuration().getAsMilliseconds())
 				};
 				data.push(dataPoint);
+				if(dataPoint.watched <= BREAK_MAX_TOLERABLE){
+					maxCorrectVal = Math.max(maxCorrectVal, dataPoint.watched);
+				}
+				if(dataPoint.opened <= BREAK_MAX_TOLERABLE){
+					maxCorrectVal = Math.max(maxCorrectVal, dataPoint.opened);
+				}
 			});
 
-			Object.values(data).map(d => d.watched).filter(d => d >= BREAK_THRESHOLD).sort((a, b) => b - a).forEach(d => addBreak(d));
-			Object.values(data).map(d => d.opened).filter(d => d >= BREAK_THRESHOLD).sort((a, b) => b - a).forEach(d => addBreak(d));
+			maxCorrectVal += BREAK_HALF_INTERVAL;
+
+			Object.values(data).map(d => d.watched).filter(d => d >= maxCorrectVal).forEach(d => addBreak(d));
+			Object.values(data).map(d => d.opened).filter(d => d >= maxCorrectVal).forEach(d => addBreak(d));
+
+			console.log(breaks);
 
 			function getTotals(list) {
 				let totalWatched = 0;
@@ -224,6 +248,13 @@ $(function () {
 
 			let bulletCount = seriesCount.bullets.push(new am4core.Circle());
 			bulletCount.radius = 5;
+
+			Object.values(breaks).forEach(b => {
+				let axisBreak = yDurationAxis.axisBreaks.create();
+				axisBreak.startValue = b.from;
+				axisBreak.endValue = b.to;
+				axisBreak.breakSize = 0.0000001;
+			});
 
 			function toggleAxes(ev) {
 				let axis = ev.target.yAxis;
