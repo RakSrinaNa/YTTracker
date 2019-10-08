@@ -1,4 +1,7 @@
 $(function () {
+	const BREAK_THRESHOLD = 25 * 60 * 60 * 1000;
+	const BREAK_HALF_INTERVAL = 30 * 60 * 1000;
+
 	am4core.useTheme(am4themes_animated);
 	am4core.useTheme(am4themes_material);
 
@@ -14,19 +17,58 @@ $(function () {
 	if (chartDiv) {
 		YTTGetConfig(null, function (config) {
 			const data = [];
+			let breaks = [];
+
+			/**
+			 * @param {number} duration The duration in milliseconds to add a break for.
+			 */
+			function addBreak(duration) {
+				let minVal = duration - BREAK_HALF_INTERVAL;
+				let maxVal = duration + BREAK_HALF_INTERVAL;
+
+				if (breaks.length === 0) {
+					breaks.push({
+						from: BREAK_THRESHOLD,
+						to: minVal
+					});
+				} else {
+					let allMax = maxVal;
+					let allMin = minVal;
+					const it = a.values();
+					let entry;
+					while (!(entry = it.next()).done) {
+						if (minVal <= entry.from && maxVal >= entry.to) { //We're inside another break, need to split it and we're done
+							it.remove();
+							breaks.push({
+								from: maxVal,
+								to: entry.to
+							});
+							breaks.push({
+								from: entry.from,
+								to: minVal
+							});
+						}
+					}
+				}
+			}
+
 			Object.keys(config).filter(k => k.startsWith('day')).map(k => k.replace('day', '')).sort(function (a, b) {
 				return YTTCompareConfigDate(b, a);
 			}).forEach(function (day) {
 				const conf = new YTTDay(config['day' + day]);
-				data.push({
+				const dataPoint = {
 					day: day,
 					date: dateFromDay(day),
 					watched: conf.getWatchedDuration().getAsMilliseconds(),
 					opened: conf.getOpenedDuration().getAsMilliseconds(),
 					count: conf.getCount(),
 					ratio: conf.getWatchedDuration().getAsMilliseconds() / Math.max(1, Math.max(conf.getWatchedDuration().getAsMilliseconds(), conf.getOpenedDuration().getAsMilliseconds()))
-				});
+				};
+				data.push(dataPoint);
 			});
+
+			Object.values(data).map(d => d.watched).filter(d => d >= BREAK_THRESHOLD).sort((a, b) => b - a).forEach(d => addBreak(d));
+			Object.values(data).map(d => d.opened).filter(d => d >= BREAK_THRESHOLD).sort((a, b) => b - a).forEach(d => addBreak(d));
 
 			function getTotals(list) {
 				let totalWatched = 0;
@@ -139,8 +181,8 @@ $(function () {
 
 			seriesWatched.name = 'Watched';
 			seriesWatched.strokeWidth = 2;
-			seriesWatched.stroke = "green";
-			seriesWatched.fill = "green";
+			seriesWatched.stroke = 'green';
+			seriesWatched.fill = 'green';
 			//series.legendSettings.valueText = "<?php //echo $this->getLegendText(); ?>//";
 			// series.fillOpacity = 0.3;
 
@@ -157,8 +199,8 @@ $(function () {
 
 			seriesOpened.name = 'Opened';
 			seriesOpened.strokeWidth = 2;
-			seriesOpened.stroke = "red";
-			seriesOpened.fill = "red";
+			seriesOpened.stroke = 'red';
+			seriesOpened.fill = 'red';
 			//series.legendSettings.valueText = "<?php //echo $this->getLegendText(); ?>//";
 			// series.fillOpacity = 0.3;
 
@@ -175,8 +217,8 @@ $(function () {
 
 			seriesCount.name = 'Count';
 			seriesCount.strokeWidth = 2;
-			seriesCount.stroke = "blue";
-			seriesCount.fill = "blue";
+			seriesCount.stroke = 'blue';
+			seriesCount.fill = 'blue';
 			//series.legendSettings.valueText = "<?php //echo $this->getLegendText(); ?>//";
 			// series.fillOpacity = 0.3;
 
